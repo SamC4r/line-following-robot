@@ -1,8 +1,9 @@
 import cv2
 
-VIDEO_URL = "http://192.168.2.242:8080/video"   # change this
+VIDEO_URL = "http://192.168.4.1:81/stream" 
 
 cap = cv2.VideoCapture(VIDEO_URL)
+#cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
 
 print("isOpened:", cap.isOpened())
 
