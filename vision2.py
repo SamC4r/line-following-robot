@@ -11,15 +11,15 @@ import serial
 VIDEO_URL = "http://192.168.4.1:81/stream"
 
 
-SERIAL_PORT = "/dev/ttyUSB0"
+SERIAL_PORT = "COM3" #"/dev/ttyUSB0"
 BAUD_RATE = 115200
 
 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 time.sleep(2)
 
 BASE_SPEED = 100
-KP = 0.20
-MAX_SPEED = 170
+KP = 1
+MAX_SPEED = 300
 MIN_SPEED = 0
 
 # MEJORA: Rango HSV ajustado. V sube hasta 255 para tolerar reflejos fuertes. 
@@ -162,8 +162,7 @@ def main():
             # Draw the contours on the original image
             if red_contour is not None:
                 contour = red_contour
-                # Draw the bounding box
-                if cv2.contourArea(contour) > MIN_CONTOUR_AREA:  # Filter small areas 
+                if cv2.contourArea(contour) > MIN_CONTOUR_AREA:
                     #print("FOUND")
                     cv2.drawContours(frame, [contour], -1, (0, 255, 0), 3)
 
@@ -223,13 +222,8 @@ def main():
 
             # Mostrar ventanas
             cv2.imshow("Robot View", frame)
-            cv2.imshow("Blue Mask (ROI solo)", mask) # Ahora la ventana de la máscara muestra solo lo que analiza
+            cv2.imshow("Blue Mask (ROI solo)", mask) 
             cv2.imshow("Red Mask", mask_red)
-
-
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
 
     finally:
         print("[INFO] Closing.")
