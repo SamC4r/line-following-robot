@@ -4,9 +4,30 @@
 import cv2
 import numpy as np
 import time
-import serial
+import socket
+import threading
 
 
+
+car = socket.socket()
+car.connect(("192.168.4.1", 100))
+
+def receiver():
+    buf = ""
+    while True:
+        try:
+            buf += car.recv(1024).decode()
+            while '{' in buf and '}' in buf:
+                start = buf.index('{')
+                end   = buf.index('}') + 1
+                msg   = buf[start:end]
+                buf   = buf[end:]
+                if msg == "{Heartbeat}":
+                    car.send(b"{Heartbeat}")
+        except:
+            break
+
+threading.Thread(target=receiver, daemon=True).start()
 
 VIDEO_URL = "http://192.168.4.1:81/stream"
 
@@ -14,12 +35,12 @@ VIDEO_URL = "http://192.168.4.1:81/stream"
 SERIAL_PORT = "COM3" #"/dev/ttyUSB0"
 BAUD_RATE = 115200
 
-ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+#ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 time.sleep(2)
 
 BASE_SPEED = 100
-KP = 1
-MAX_SPEED = 300
+KP = 0.5
+MAX_SPEED = 200
 MIN_SPEED = 0
 
 # MEJORA: Rango HSV ajustado. V sube hasta 255 para tolerar reflejos fuertes. 
@@ -58,7 +79,9 @@ def print_command(left_speed, right_speed):
     cmd = f"M,{left_speed},{right_speed}"
     if cmd != LAST_COMMAND:
         print(cmd)
-        ser.write((cmd + "\n").encode())
+        car.send(("{" + cmd + "}").encode()) 
+        #ser.write((cmd + "\n").encode())
+        #print("A")
         LAST_COMMAND = cmd
 
 
@@ -68,7 +91,7 @@ def print_stop():
 
 def main():
     print("[INFO] Opening phone video stream...")
-    cap = cv2.VideoCapture(VIDEO_URL,cv2.CAP_FFMPEG)
+    cap = cv2.VideoCapture(VIDEO_URL, cv2.CAP_FFMPEG)
 
     if not cap.isOpened():
         print("[ERROR] Could not open video stream.")
@@ -225,10 +248,15 @@ def main():
             cv2.imshow("Blue Mask (ROI solo)", mask) 
             cv2.imshow("Red Mask", mask_red)
 
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+
     finally:
         print("[INFO] Closing.")
         cap.release()
         cv2.destroyAllWindows()
+        car.close()
 
 
 if __name__ == "__main__":
