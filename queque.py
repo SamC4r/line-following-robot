@@ -37,12 +37,5 @@ def motor(left, right):
 def stop():
     motor(0, 0)
 
-time.sleep(1)      
-
-motor(150, 150)     
-time.sleep(2)
-motor(150, 150)     
-motor(0,0)     
-
-time.sleep(2)
+motor(200,200)
 car.close()
