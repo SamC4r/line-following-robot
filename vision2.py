@@ -3,10 +3,13 @@ import numpy as np
 import time
 import socket
 import threading
+import math
 
 car = socket.socket()
 car.connect(("192.168.4.1", 100))
 
+
+#porque el codigo de fabrica hace esta wea
 def receiver():
     buf = ""
     while True:
@@ -29,6 +32,7 @@ VIDEO_URL = "http://192.168.4.1:81/stream"
 BASE_SPEED = 70
 MAX_SPEED  = 200
 MIN_SPEED  = 50  
+BIAS_FACTOR = 80
 
 # PD tuning
 kp = 0.4
@@ -37,7 +41,6 @@ ki = 0.003
 ki_max = 100
 integral = 0
 
-# Level 1: adaptive speed
 CURVE_BRAKE = 0.8   # how aggressively to slow down on curves (higher = slower on curves)
 MIN_CURVE_SPEED = 50  # minimum speed when cornering
 
@@ -56,13 +59,15 @@ FRAME_WIDTH      = 480
 SEARCH_SPEED   = 70
 SEARCH_TIMEOUT = 3.0
 
-# ── State 
+
+
+
 LAST_COMMAND   = None
 last_error     = 0
 prev_error     = 0
 line_lost_time = None
 
-# ── Helpers ───────────────────────────────────────────────────
+
 def clamp(x, low, high):
     return max(low, min(high, x))
 
@@ -82,8 +87,62 @@ def send_command(left, right):
         car.send(("{" + cmd + "}").encode())
         LAST_COMMAND = cmd
 
+def detect_arrow_orientation(cnt):
+    M = cv2.moments(cnt);
+    if M["m00"] != 0:
+        cx  = int(M["m10"] / M["m00"])
+        cy  = int(M["m01"] / M["m00"])
+
+
+        pts = cnt.reshape(-1,2) # TO Nx2 matrix
+
+        d = np.sum((pts - np.array([cx,cy]))**2,axis=1)  #axis=1 gives 1 squared distance per point
+        tip_idx = np.argmax(d)
+        tip = pts[tip_idx];
+
+        dx = tip[0]-cx;
+        dy = tip[1]-cy;
+
+        angle = math.degrees(math.atan2(dy,dx))
+
+        return angle, (cx,cy),(tip[0],tip[1])
+
+def angle_to_bias(angle):
+   
+    return int(math.cos(math.radians(angle)) * BIAS_FACTOR)
+
+def detect_shape(frame,cnt):
+    angle, center, tip  = detect_arrow_orientation(cnt)
+    
+    if angle is not None:
+        cv2.circle(frame,center,6,(255,0,0),-1)
+        cv2.circle(frame,tip,8,(0,0,255),-1)
+
+        cv2.line(frame,center,tip,(0,255,255),2)
+
+        cv2.putText(frame,f"{angle:.2f} degrees", (center[0] + 10,center[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255),2)
+
+    b = angle_to_bias(angle)
+
+    return b;
+
+
 def stop():
     send_command(0, 0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def main():
     global last_error, prev_error, line_lost_time,integral
@@ -109,51 +168,59 @@ def main():
                 stop()
                 continue
 
-            # ── Resize 
+            
             h0, w0 = frame.shape[:2]
             frame   = cv2.resize(frame, (FRAME_WIDTH, int(h0 * FRAME_WIDTH / w0)))
             h, w    = frame.shape[:2]
             center_x = w // 2
 
-            # ── ROI
+            # ROI
             roi_y     = int(h * ROI_START_RATIO)
             roi_frame = frame[roi_y:h, :]
 
-            # ── Blue mask 
+
+            # BLUE MASK
             blurred_roi = cv2.GaussianBlur(roi_frame, (9, 9), 0)
             hsv_roi     = cv2.cvtColor(blurred_roi, cv2.COLOR_BGR2HSV)
             mask        = cv2.inRange(hsv_roi, LOWER_BLUE, UPPER_BLUE)
             mask        = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  kernel)
             mask        = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-            # ── Red mask 
+
+            # RED MASK 
             blurred_full = cv2.GaussianBlur(frame, (9, 9), 0)
             hsv_full     = cv2.cvtColor(blurred_full, cv2.COLOR_BGR2HSV)
             mask_red     = cv2.bitwise_or( cv2.inRange(hsv_full, LOWER_RED_1, UPPER_RED_1), cv2.inRange(hsv_full, LOWER_RED_2, UPPER_RED_2))
             mask_red     = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN,  kernel_red_open)
             mask_red     = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel_red_close)
 
-            # ── Red line → intersection 
+
+            # Red line → intersection 
             red_cnt      = largest_contour(mask_red)
             red_detected = (red_cnt is not None and
-                            cv2.contourArea(red_cnt) > MIN_CONTOUR_AREA * 3)
+                            cv2.contourArea(red_cnt) > MIN_CONTOUR_AREA*2)
+
+            bias = 0
 
             if red_detected:
                 cv2.drawContours(frame, [red_cnt], -1, (0, 165, 255), 3)
-                cv2.putText(frame, "RED LINE - STOP/TURN", (10, 150),
+                cv2.putText(frame, "RED LINE", (10, 150),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
-                stop()
+                bias = detect_shape(frame, red_cnt)
+                print("RED DETECTED with bias",bias)
 
-            # ── Blue line tracking ────────────────────────────
+
+            # BLUE LINE TRACK
             cnt        = largest_contour(mask)
             line_found = False
 
             if cnt is not None and cv2.contourArea(cnt) > MIN_CONTOUR_AREA:
                 M = cv2.moments(cnt)
+                # CENTROID OF LINE
                 if M["m00"] != 0:
                     cx        = int(M["m10"] / M["m00"])
                     cy        = int(M["m01"] / M["m00"])
-                    cx_global = cx
+                    cx_global = cx + bias
                     cy_global = cy + roi_y
                     line_found = True
 
