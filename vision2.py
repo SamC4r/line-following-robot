@@ -27,26 +27,32 @@ threading.Thread(target=receiver, daemon=True).start()
 
 VIDEO_URL = "http://192.168.4.1:81/stream"
 
-BASE_SPEED      = 40
+BASE_SPEED      = 30
 MAX_SPEED       = 3 * BASE_SPEED
 MIN_SPEED       = 10
 BIAS_FACTOR     = 30
 
-kp      = 0.45
-kd      = 0.5
+kp      = 0.40
+kd      = 0.4
 ki      = 0.001
 ki_max  = 20
 integral = 0
 
 kp_turn = 0.25
-kd_turn = 0.30
+kd_turn = 0.31
 ki_turn = 0.0004
 
 CURVE_BRAKE     = 0.5
 MIN_CURVE_SPEED = MIN_SPEED
 
-LOWER_BLUE  = np.array([85,  40,  40])
-UPPER_BLUE  = np.array([115, 255, 255])
+'''
+LOWER_BLUE  = np.array([85,  30,  120])
+UPPER_BLUE  = np.array([105, 255, 255])
+'''
+
+LOWER_BLUE = np.array([80,20,100])
+UPPER_BLUE = np.array([125,255,255])
+
 
 LOWER_RED_1 = np.array([0,   100, 80])
 UPPER_RED_1 = np.array([10,  255, 255])
@@ -59,9 +65,9 @@ FRAME_WIDTH                 = 480
 SEARCH_SPEED                = 2*BASE_SPEED
 SEARCH_TIMEOUT              = 3.0
 
-ZONE_PIXEL_RATIO            = 0.04
-INTERSECTION_CONFIRM_FRAMES = 25
-INTERSECTION_COOLDOWN       = 1               # 1 second to detect another intersection
+ZONE_PIXEL_RATIO            = 0.01
+INTERSECTION_CONFIRM_FRAMES = 35
+INTERSECTION_COOLDOWN       = 0.5
 TURN_SPEED                  = 10
 
 INTERSECTION_MAP = {
@@ -174,8 +180,8 @@ def detect_intersection(mask, frame, roi_y):
 
     sq_x1  = third
     sq_x2  = 2 * third
-    sq_y1  = max(0, fh // 3 - roi_y)
-    sq_y2  = max(0, 2 * fh // 3 - roi_y)
+    sq_y1  = max(0, 2*fh // 10 - roi_y)
+    sq_y2  = max(0, 5 * fh // 10 - roi_y)
     sq_roi = mask[sq_y1:sq_y2, sq_x1:sq_x2]
     sq_active = (sq_roi.size > 0 and
                  int(np.count_nonzero(sq_roi)) / sq_roi.size >= ZONE_PIXEL_RATIO)
@@ -203,9 +209,9 @@ def detect_intersection(mask, frame, roi_y):
 
     sq_color = (0, 255, 100) if sq_active else (100, 100, 100)
 
-    cv2.rectangle(frame, (sq_x1, fh // 3), (sq_x2, 2 * fh // 3), sq_color, 2)
+    cv2.rectangle(frame, (sq_x1, 2 * fh // 10), (sq_x2, 5 * fh // 10), sq_color, 2)
     cv2.putText(frame, f"{'■' if sq_active else '□'} SQ",
-                (sq_x1 + 4, fh // 3 + 16),
+            (sq_x1 + 4, 3 * fh // 5 + 16),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, sq_color, 1)
 
     banner_color = (0, 255, 0) if label == "STRAIGHT" else (0, 165, 255)
