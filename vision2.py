@@ -183,8 +183,10 @@ def load_marks():
     templates = {}
 
     files = {
-        "TELEFONO": "telephone.jpeg",
-        "ESCALERA": "stairs.jpeg",
+       # "TELEFONO": "telephone.jpeg",
+       # "ESCALERA": "stairs.jpeg",
+        "CRUZ":"cross.jpeg",
+        "HUMANO": "human.jpeg",
     }
 
     for label, filename in files.items():
