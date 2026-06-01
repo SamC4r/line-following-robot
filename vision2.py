@@ -4,6 +4,7 @@ import time
 import socket
 import threading
 import math
+import os
 
 car = socket.socket()
 car.connect(("192.168.4.1", 100))
@@ -29,8 +30,8 @@ threading.Thread(target=receiver, daemon=True).start()
 
 VIDEO_URL = "http://192.168.4.1:81/stream"
 
-BASE_SPEED = 30
-MAX_SPEED = 3 * BASE_SPEED
+BASE_SPEED = 40
+MAX_SPEED =  BASE_SPEED+20
 MIN_SPEED = 10
 
 kp = 0.65
@@ -118,6 +119,167 @@ DEBUG_ARROW = True
 ARROW_DEBUG_INTERVAL = 0.15
 last_arrow_debug_time = 0.0
 
+# Marcas / Figuras
+
+MARK_MIN_AREA = 250
+MARK_MAX_AREA = 80000
+
+MARK_MATCH_THRESHOLD = 1000
+
+
+
+'''
+FUNCIONES PARA LAS MARCAS
+
+https://learnopencv.com/shape-matching-using-hu-moments-c-python/
+
+Hu Moments
+'''
+def find_red_contours_for_marks(mask_red):
+    contours, _ = cv2.findContours(
+        mask_red,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    valid = []
+
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+
+        if area < MARK_MIN_AREA: continue
+
+        if area > MARK_MAX_AREA: continue
+
+        x, y, w, h = cv2.boundingRect(cnt)
+
+        if w < 10 or h < 10:
+            continue
+
+        valid.append(cnt)
+
+    return valid
+
+def red_mask(img):
+    blurred = cv2.GaussianBlur(img, (7, 7), 0)
+    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+
+    mask_red = cv2.bitwise_or(
+        cv2.inRange(hsv, LOWER_RED_1, UPPER_RED_1),
+        cv2.inRange(hsv, LOWER_RED_2, UPPER_RED_2)
+    )
+
+    kernel_open = np.ones((3, 3), np.uint8)
+    kernel_close = np.ones((5, 5), np.uint8)
+
+    mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel_open)
+    mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel_close)
+
+    return mask_red
+
+
+# extraer los contornos rojos de las marcas
+def load_marks():
+    templates = {}
+
+    files = {
+        "TELEFONO": "telephone.jpeg",
+        "ESCALERA": "stairs.jpeg",
+    }
+
+    for label, filename in files.items():
+        img = cv2.imread(filename)
+
+        if img is None:
+            print(f"Error, img is None")
+            continue
+
+        mask = red_mask(img)
+        cnt = largest_contour(mask)
+
+        templates[label] = cnt
+        print(f" Mark  {label}")
+
+    return templates
+
+def classify_mark_hu(cnt, imgs):
+    best_label = None
+    best_score = float("inf")
+
+    for label, im in imgs.items():
+        score = cv2.matchShapes(
+            cnt,
+            im,
+            cv2.CONTOURS_MATCH_I2,   # Metrica I2
+            0.0
+        )
+
+        if score < best_score:
+            best_score = score
+            best_label = label
+
+    if best_label is not None and best_score <= MARK_MATCH_THRESHOLD:
+        return best_label, best_score
+
+    return None, best_score
+
+
+def detect_mark_hu(frame, mask_red, templates):
+    contours = find_red_contours_for_marks(mask_red)
+
+    best_detection = None
+
+    for cnt in contours:
+        label, score = classify_mark_hu(cnt, templates)
+
+        x, y, w, h = cv2.boundingRect(cnt)
+
+        if label is None:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (80, 80, 80), 1)
+            cv2.putText(
+                frame,
+                f"UNKNOWN {score:.3f}",
+                (x, max(20, y - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (80, 80, 80),
+                1
+            )
+            continue
+
+        if best_detection is None or score < best_detection[1]:
+            best_detection = (label, score, cnt)
+
+    if best_detection is None:
+        return None, None
+
+    label, score, cnt = best_detection
+    x, y, w, h = cv2.boundingRect(cnt)
+
+    cv2.rectangle(
+        frame,
+        (x, y),
+        (x + w, y + h),
+        (0, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        f"MARK: {label} {score:.3f}",
+        (x, max(20, y - 8)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (0, 255, 255),
+        2
+    )
+
+    return label, score
+
+
+'''
+FUNCIONES PARA LAS FLECHAS
+'''
 
 def debug_arrow(msg):
     global last_arrow_debug_time
@@ -196,7 +358,7 @@ def classify_arrow_direction(angle):
 def detect_arrow(frame, cnt):
     angle, center, tip = detect_arrow_orientation(cnt)
     arrow_direction = classify_arrow_direction(angle)
-    print("AAAAA",arrow_direction)
+    #print("AAAAA",arrow_direction)
     if angle is not None:
         cv2.circle(frame, center, 6, (255, 0, 0), -1)
         cv2.circle(frame, tip, 8, (0, 0, 255), -1)
@@ -310,7 +472,6 @@ def detect_intersection(mask, frame, roi_y):
 def choose_direction(intersection_label, arrow_direction, arrow_detected):
     allowed = INTERSECTION_OPTIONS.get(intersection_label)
     if not allowed:
-        debug_arrow(f"intersection={intersection_label} has no allowed options")
         return None, ""
 
     debug_arrow(
@@ -318,7 +479,7 @@ def choose_direction(intersection_label, arrow_direction, arrow_detected):
     )
 
     if arrow_detected and arrow_direction in allowed:
-        debug_arrow(f"decision from arrow -> {arrow_direction}")
+        debug_arrow(f"decision from arrow: {arrow_direction}")
         return arrow_direction, "ARROW"
 
     default_direction = DEFAULT_DIRECTIONS[intersection_label]
@@ -361,6 +522,8 @@ def main():
 
     time.sleep(1)
 
+    marks = load_marks()
+
     try:
         while True:
             ret, frame = cap.read()
@@ -378,6 +541,8 @@ def main():
             roi_y = int(h * ROI_START_RATIO)
             roi_frame = frame[roi_y:h, :]
 
+            ### AZUL ###
+
             blurred_roi = cv2.GaussianBlur(roi_frame, (9, 9), 0)
             hsv_roi = cv2.cvtColor(blurred_roi, cv2.COLOR_BGR2HSV)
             mask = cv2.inRange(hsv_roi, LOWER_BLUE, UPPER_BLUE)
@@ -386,10 +551,15 @@ def main():
 
             blurred_full = cv2.GaussianBlur(frame, (9, 9), 0)
             hsv_full = cv2.cvtColor(blurred_full, cv2.COLOR_BGR2HSV)
+
+
+            ### ROJO ###
+
             mask_red = cv2.bitwise_or(
                 cv2.inRange(hsv_full, LOWER_RED_1, UPPER_RED_1),
                 cv2.inRange(hsv_full, LOWER_RED_2, UPPER_RED_2)
             )
+            
             mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel_red_open)
             mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel_red_close)
 
@@ -402,11 +572,22 @@ def main():
             red_detected = red_cnt is not None and cv2.contourArea(red_cnt) > MIN_CONTOUR_AREA
             arrow_direction = None
 
-            if red_detected:
+            intersection = (
+                intersection_label not in ("STRAIGHT", "NO LINE") and
+                not intersection_label.startswith("UNKNOWN")
+            )
+
+            if red_detected and intersection:
                 cv2.drawContours(frame, [red_cnt], -1, (0, 165, 255), 3)
                 cv2.putText(frame, "RED ARROW", (10, 150),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
                 arrow_direction = detect_arrow(frame, red_cnt)
+
+            elif red_detected and not intersection and state==STATE_FOLLOWING:
+                mark_label, mark_score = detect_mark_hu(frame, mask_red, marks)
+                if mark_label is not None:
+                    print(f"[MARCAAAAAAAAAAAAAAA] detectada:  {mark_label} score={mark_score:.3f}")
+                    
 
             if state == STATE_TURNING and pending_direction == "R":
                 track_mask = mask[:, 2 * third:]
@@ -549,7 +730,6 @@ def main():
                 send_command(dynamic_speed + turn, dynamic_speed - turn)
 
                 if turn_done:
-                    print(f"[INFO] Turn complete -> follow")
                     integral = 0
                     prev_error = 0
                     last_intersection_time = time.time()
